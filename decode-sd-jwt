@@ -37,7 +37,7 @@ def decode_disclosure(input)
   digest  = encode_base64url(sha256(input))
   decoded = decode_base64url(input)
 
-  "{ \"#{digest}\": #{decoded} }"
+  prettify_json "{ \"#{digest}\": #{decoded} }"
 end
 
 def decode_jwt(input)
