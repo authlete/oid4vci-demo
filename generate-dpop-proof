@@ -1,0 +1,189 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   This script generates a DPoP proof JWT that complies with RFC 9449.
+#
+# USAGE
+# -----
+#
+#   generate-dpop-proof
+#     --at={ACCESS_TOKEN}                      # -a {ACCESS_TOKEN}
+#     --ath={ACCESS_TOKEN_HASH}                # -h {ACCESS_TOKEN_HASH}
+#     --htm={HTM}                              # -m {HTM}
+#     --htu={HTU}                              # -u {HTU}
+#     --key={PRIVATE_KEY_IN_JWK_FORMAT}        # -k {PRIVATE_KEY_IN_JWK_FORMAT}
+#     --nonce={NONCE}                          # -n {NONCE}
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'base64'
+require 'digest/sha2'
+require 'securerandom'
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing with the key.
+  jws = sign(payload, options.key)
+
+  # Write the JWS to the standard output.
+  puts jws
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload.
+#------------------------------------------------------------
+def build_payload(options)
+  # JWT ID
+  jti = SecureRandom.alphanumeric(16)
+
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload
+  {
+    jti:   jti,
+    htm:   options.htm,
+    htu:   options.htu,
+    iat:   now,
+    ath:   options.ath,
+    nonce: options.nonce
+  }.compact
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing with the key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the header and the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Set up some header parameters.
+  jwt.typ = 'dpop+jwt'
+  jwt.jwk = jwk.normalize  # to a public key
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DESC_AT    = "The value of the access token, used to compute the value of the 'ath' claim."
+  DESC_ATH   = "The value of the 'ath' claim."
+  DESC_HTM   = "The value of the 'htm' claim."
+  DESC_HTU   = "The value of the 'htu' claim."
+  DESC_KEY   = "A file containing a private key in the JWK format."
+  DESC_NONCE = "The 'nonce' value that has been issued via the 'DPoP-Nonce' HTTP header."
+
+  attr_reader :ath, :htm, :htu, :key, :nonce
+
+  def initialize
+    super
+
+    @ath   = nil
+    @htm   = nil
+    @htu   = nil
+    @key   = nil
+    @nonce = nil
+
+    self.on('-a AT', '--at=AT', DESC_AT) do |at|
+      digest = Digest::SHA256.digest(at)
+      @ath   = Base64.urlsafe_encode64(digest, padding:false)
+    end
+
+    self.on('-h ATH', '--ath=AHT', DESC_ATH) do |ath|
+      @ath = ath
+    end
+
+    self.on('-m HTM', '--htm=HTM', DESC_HTM) do |htm|
+      @htm = htm
+    end
+
+    self.on('-u HTU', '--htu=HTU', DESC_HTU) do |htu|
+      @htu = htu
+    end
+
+    self.on('-k FILE', '--key=FILE', DESC_KEY) do |file|
+      @key = self.read_jwk(file)
+    end
+
+    self.on('-n NONCE', '--nonce=NONCE', DESC_NONCE) do |nonce|
+      @nonce = nonce
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@htm, '--htm=HTM')
+    error_if_missing(@htu, '--htu=HTU')
+    error_if_missing(@key, '--key=FILE')
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Extension of the json-jwt library
+#------------------------------------------------------------
+module JSON
+  class JWT
+    # Override the 'sign' method not to include 'kid'.
+    def sign(private_key_or_secret, algorithm = :autodetect)
+      jws = JWS.new self
+      jws.alg = algorithm
+      jws.sign! private_key_or_secret
+    end
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
