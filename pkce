@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   This script generates a code verifier with 256-bit entropy
+#   (43 characters in base64url) and computes the code challenge
+#   corresponding to the code verifier.
+#
+# REFERENCES
+# ----------
+#
+#   RFC 7636 Proof Key for Code Exchange by OAuth Public Clients
+#     https://www.rfc-editor.org/rfc/rfc7636.html
+#
+
+
+require "base64"
+require "digest/sha2"
+require "securerandom"
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Generate a code verifier.
+  verifier = base64url_encode(random_bytes(32))
+
+  # Generate a code challenge.
+  challenge = base64url_encode(sha256(verifier))
+
+  # Print the generated values.
+  puts "CODE_VERIFIER=#{verifier}"
+  puts "CODE_CHALLENGE=#{challenge}"
+end
+
+
+#------------------------------------------------------------
+# Generate a random bytes of the specified size.
+#------------------------------------------------------------
+def random_bytes(size)
+  SecureRandom.random_bytes(size)
+end
+
+
+#------------------------------------------------------------
+# Compute the SHA-256 digest of the input data.
+#------------------------------------------------------------
+def sha256(input)
+  Digest::SHA256.digest(input)
+end
+
+
+#------------------------------------------------------------
+# Base64url-encode the input data.
+#------------------------------------------------------------
+def base64url_encode(input)
+  Base64.urlsafe_encode64(input, padding: false)
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
