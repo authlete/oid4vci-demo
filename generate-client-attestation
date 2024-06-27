@@ -1,0 +1,169 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   This script geerates a client attestation that complies with
+#   OAuth 2.0 Attestation-Based Client Authentication.
+#
+# USAGE
+# -----
+#
+#   generate-client-attestation
+#     --attester-id={ATTESTER_ID}
+#     --attester-key={ATTESTER_PRIVATE_KEY_FILE}
+#     --client-id={CLIENT_ID}
+#     --client-key={CLIENT_PUBLIC_KEY_FILE}
+#     --duration={DURATION_IN_SECONDS}
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload of the client attestation.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing with the attester's key.
+  attestation = sign(payload, options.attester_key)
+
+  # Write the client attestation to the standard output.
+  puts attestation
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload of the client attestation
+#------------------------------------------------------------
+def build_payload(options)
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload of a client attestation
+  {
+    iss: options.attester_id,
+    sub: options.client_id,
+    iat: now,
+    exp: now + options.duration,
+    cnf: {
+      jwk: options.client_key
+    }
+  }
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing with the attester's key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the header and the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DESC_ATTESTER_ID  = "The identifier of the client attestation issuer."
+  DESC_ATTESTER_KEY = "The file containing the private key of the client attestation issuer in the JWK format."
+  DESC_CLIENT_ID    = "The identifier of the client application."
+  DESC_CLIENT_KEY   = "The file containing the public key of the client application in the JWK format."
+  DESC_DURATION     = "The duration of the client attestation in seconds. The default value is 86400."
+
+  attr_reader :attester_id, :attester_key, :client_id, :client_key, :duration
+
+  def initialize
+    super
+
+    @attester_id  = nil
+    @attester_key = nil
+    @client_id    = nil
+    @client_key   = nil
+    @duration     = 86400
+
+    self.on('--attester-id=ATTESTER_ID', DESC_ATTESTER_ID) do |id|
+      @attester_id = id
+    end
+
+    self.on('--attester-key=FILE', DESC_ATTESTER_KEY) do |file|
+      @attester_key = self.read_jwk(file)
+    end
+
+    self.on('--client-id=CLIENT_ID', DESC_CLIENT_ID) do |id|
+      @client_id = id
+    end
+
+    self.on('--client-key=FILE', DESC_CLIENT_KEY) do |file|
+      # The 'normalize' method converts the key to a public key.
+      @client_key = self.read_jwk(file).normalize
+    end
+
+    self.on('--duration=DURATION', DESC_DURATION) do |duration|
+      @duration = self.to_integer(duration, '--duration')
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def to_integer(value, option)
+    begin
+      return Integer(value)
+    rescue ArgumentError
+      raise OptionParser::ParseError.new "The value of the '#{option}' option is not an integer."
+    end
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@attester_id,  '--attester-id=ATTESTER_ID')
+    error_if_missing(@attester_key, '--attester-key=FILE')
+    error_if_missing(@client_id,    '--client-id=CLIENT_ID')
+    error_if_missing(@client_key,   '--client-key=CLIENT_KEY')
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)

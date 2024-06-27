@@ -1,0 +1,162 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   This script geerates a client attestation PoP that complies with
+#   OAuth 2.0 Attestation-Based Client Authentication.
+#
+# USAGE
+# -----
+#
+#   generate-client-attestation-pop
+#     --as-id={AUTHORIZATION_SERVER_ID}
+#     --client-id={CLIENT_ID}
+#     --client-key={CLIENT_PRIVATE_KEY_FILE}
+#     --duration={DURATION_IN_SECONDS}
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'securerandom'
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload of the client attestation PoP.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing with the client's key.
+  attestation_pop = sign(payload, options.client_key)
+
+  # Write the client attestation PoP to the standard output.
+  puts attestation_pop
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload of the client attestation PoP
+#------------------------------------------------------------
+def build_payload(options)
+  # JWT ID
+  jti = SecureRandom.alphanumeric(16)
+
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload of a client attestation PoP
+  {
+    iss: options.client_id,
+    iat: now,
+    exp: now + options.duration,
+    jti: jti,
+    aud: options.as_id
+  }
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing with the client's key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the header and the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DESC_AS_ID      = "The identifier of the authorization server."
+  DESC_CLIENT_ID  = "The identifier of the client application."
+  DESC_CLIENT_KEY = "The file containing the private key of the client application in the JWK format."
+  DESC_DURATION   = "The duration of the client attestation PoP in seconds. The default value is 86400."
+
+  attr_reader :as_id, :client_id, :client_key, :duration
+
+  def initialize
+    super
+
+    @as_id      = nil
+    @client_id  = nil
+    @client_key = nil
+    @duration   = 86400
+
+    self.on('--as-id=AS_ID', DESC_AS_ID) do |id|
+      @as_id = id
+    end
+
+    self.on('--client-id=CLIENT_ID', DESC_CLIENT_ID) do |id|
+      @client_id = id
+    end
+
+    self.on('--client-key=FILE', DESC_CLIENT_KEY) do |file|
+      @client_key = self.read_jwk(file)
+    end
+
+    self.on('--duration=DURATION', DESC_DURATION) do |duration|
+      @duration = self.to_integer(duration, '--duration')
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def to_integer(value, option)
+    begin
+      return Integer(value)
+    rescue ArgumentError
+      raise OptionParser::ParseError.new "The value of the '#{option}' option is not an integer."
+    end
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@as_id,      '--as-id=AUTHORIZATION_SERVER_ID')
+    error_if_missing(@client_id,  '--client-id=CLIENT_ID')
+    error_if_missing(@client_key, '--client-key=CLIENT_KEY')
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
