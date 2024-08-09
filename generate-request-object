@@ -1,0 +1,156 @@
+#!/usr/bin/env ruby
+#
+# USAGE
+# -----
+#
+#   generate-request-object
+#     --aud={ISSUER}
+#     --iss={CLIENT_ID}
+#     --key={PRIVATE_KEY_IN_JWK_FORMAT}
+#     [--duration={DURATION_IN_SECONDS}]
+#     [--params={REQUEST_PARAMETERS_IN_JSON_FORMAT}]
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'securerandom'
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload of the request object.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing the payload with the key.
+  request_object = sign(payload, options.key)
+
+  # Write the request object to the standard output.
+  puts request_object
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload of the request object.
+#------------------------------------------------------------
+def build_payload(options)
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload of a request object
+  {
+    aud: options.audience,
+    iss: options.issuer,
+    exp: now + options.duration,
+    iat: now,
+    nbf: now,
+    jti: SecureRandom.uuid
+  }.merge(options.params)
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing the payload with the key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk, jwk[:alg]).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DEFAULT_DURATION = 3600
+  DEFAULT_PARAMS   = {}
+
+  DESC_AUDIENCE = "The value of the 'aud' claim. For example, the URL of the token endpoint."
+  DESC_DURATION = "The duration of the request object in seconds. The default value is #{DEFAULT_DURATION}."
+  DESC_ISSUER   = "The value of the 'iss' claim. The client ID."
+  DESC_KEY      = "A file containing a private key in the JWK format."
+  DESC_PARAMS   = "The request parameters in the JSON format."
+
+  attr_reader :audience, :duration, :issuer, :key, :params
+
+  def initialize
+    super
+
+    @audience = nil
+    @duration = DEFAULT_DURATION
+    @issuer   = nil
+    @key      = nil
+    @params   = DEFAULT_PARAMS
+
+    self.on('-a AUDIENCE', '--aud=AUDIENCE', DESC_AUDIENCE) do |audience|
+      @audience = audience
+    end
+
+    self.on('-d DURATION', '--duration=DURATION', /^[1-9][0-9]+$/, DESC_DURATION) do |duration|
+      @duration = duration.to_i
+    end
+
+    self.on('-k FILE', '--key=FILE', DESC_KEY) do |file|
+      @key = self.read_jwk(file)
+    end
+
+    self.on('-i CLIENT_ID', '--iss=CLIENT_ID', DESC_ISSUER) do |issuer|
+      @issuer = issuer
+    end
+
+    self.on('-p PARAMS', '--params=PARAMS', DESC_PARAMS) do |params|
+      @params = JSON.parse(params, {symbolize_names: true})
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@audience, '--aud=AUDIENCE')
+    error_if_missing(@issuer,   '--iss=CLIENT_ID')
+    error_if_missing(@key,      '--key=FILE')
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
