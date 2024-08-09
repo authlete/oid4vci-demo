@@ -1,0 +1,148 @@
+#!/usr/bin/env ruby
+#
+# USAGE
+# -----
+#
+#   generate-client-assertion
+#     --aud={ISSUER}
+#     --key={PRIVATE_KEY_IN_JWK_FORMAT}
+#     --sub={CLIENT_ID}
+#     [--duration={DURATION_IN_SECONDS}]
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'securerandom'
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload of the client assertion.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing the payload with the key.
+  assertion = sign(payload, options.key)
+
+  # Write the client assertion to the standard output.
+  puts assertion
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload of the client assertion.
+#------------------------------------------------------------
+def build_payload(options)
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload of a client assertion (RFC 7523)
+  {
+    iss: options.subject,
+    sub: options.subject,
+    aud: options.audience,
+    iat: now,
+    exp: now + options.duration,
+    jti: SecureRandom.uuid
+  }
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing the payload with the key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk, jwk[:alg]).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DEFAULT_DURATION = 3600
+
+  DESC_AUDIENCE = "The value of the 'aud' claim. For example, the URL of the token endpoint."
+  DESC_DURATION = "The duration of the client assertion in seconds. The default value is #{DEFAULT_DURATION}."
+  DESC_KEY      = "A file containing a private key in the JWK format."
+  DESC_SUBJECT  = "The value of the 'sub' claim. The client ID."
+
+  attr_reader :audience, :duration, :key, :subject
+
+  def initialize
+    super
+
+    @audience = nil
+    @duration = DEFAULT_DURATION
+    @key      = nil
+    @subject  = nil
+
+    self.on('-a AUDIENCE', '--aud=AUDIENCE', DESC_AUDIENCE) do |audience|
+      @audience = audience
+    end
+
+    self.on('-d DURATION', '--duration=DURATION', /^[1-9][0-9]+$/, DESC_DURATION) do |duration|
+      @duration = duration.to_i
+    end
+
+    self.on('-k FILE', '--key=FILE', DESC_KEY) do |file|
+      @key = self.read_jwk(file)
+    end
+
+    self.on('-s SUBJECT', '--sub=SUBJECT', DESC_SUBJECT) do |subject|
+      @subject = subject
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@audience, '--aud=AUDIENCE')
+    error_if_missing(@key,      '--key=FILE')
+    error_if_missing(@subject,  '--sub=SUBJECT')
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
