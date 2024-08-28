@@ -106,7 +106,7 @@ class Options < OptionParser
     end
 
     self.on('-k FILE', '--key=FILE', DESC_KEY) do |file|
-      @key = self.read_jwk(file)
+      @key = read_jwk(file)
     end
 
     self.on('-i CLIENT_ID', '--iss=CLIENT_ID', DESC_ISSUER) do |issuer|

@@ -108,11 +108,11 @@ class Options < OptionParser
     end
 
     self.on('--client-key=FILE', DESC_CLIENT_KEY) do |file|
-      @client_key = self.read_jwk(file)
+      @client_key = read_jwk(file)
     end
 
     self.on('--duration=DURATION', DESC_DURATION) do |duration|
-      @duration = self.to_integer(duration, '--duration')
+      @duration = to_integer(duration, '--duration')
     end
   end
 

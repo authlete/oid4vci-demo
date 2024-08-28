@@ -105,7 +105,7 @@ class Options < OptionParser
     end
 
     self.on('--attester-key=FILE', DESC_ATTESTER_KEY) do |file|
-      @attester_key = self.read_jwk(file)
+      @attester_key = read_jwk(file)
     end
 
     self.on('--client-id=CLIENT_ID', DESC_CLIENT_ID) do |id|
@@ -114,11 +114,11 @@ class Options < OptionParser
 
     self.on('--client-key=FILE', DESC_CLIENT_KEY) do |file|
       # The 'normalize' method converts the key to a public key.
-      @client_key = self.read_jwk(file).normalize
+      @client_key = read_jwk(file).normalize
     end
 
     self.on('--duration=DURATION', DESC_DURATION) do |duration|
-      @duration = self.to_integer(duration, '--duration')
+      @duration = to_integer(duration, '--duration')
     end
   end
 
