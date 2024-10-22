@@ -1,0 +1,418 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   Verify an HTTP message signature.
+#
+# USAGE
+# -----
+#
+#   verify-http-message-signature
+#       --key FILE              # Public key in the JWK format.
+#       --signature SIGNATURE   # HTTP message signature to verify.
+#       [--alg ALG]             # Algorithm (RFC 9421 Section 3.3)
+#       [--baseline BASELINE]   # signature-base-line (RFC 9421 Section 2.5)
+#       [--created TIME]        # TIME is seconds since epoch, or 'now'.
+#       [--expires TIME]        # TIME is seconds since epoch, or '+{seconds}'
+#       [--keyid KEYID]         # Key ID
+#       [--nonce NONCE]         # Nonce
+#       [--tag TAG]             # Tag
+#       [--print-all]
+#       [--[no-]print-signature-base]
+#       [--[no-]print-signature-metadata]
+#       [--[no-]print-verification-result]
+#
+# EXAMPLE
+# -------
+#
+#   SIGNATURE=:qgdoRZrTtwyUNf5mNLyfLxyM3dipSIEc9OoM2931znzz1w9jhIwM0L9lBOJA2kU9OglMKwrbc1jW05iL1z+qRg==:
+#   TARGET_URI=https://fapidev-rs.authlete.net/api/fapi/accounts?key=value
+#   CONTENT_DIGEST=sha-256=:RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=:
+#   CREATED=1729607861
+#   KEYID=tsq5sQwuoADZ3iARLOreaYaIa9mG5TnV11zpRRjuA0k
+#
+#   verify-http-message-signature \
+#     --key response-signing.jwk \
+#     --signature ${SIGNATURE} \
+#     --baseline "\"@method\";req: GET" \
+#     --baseline "\"@target-uri\";req: ${TARGET_URI}" \
+#     --baseline "\"@status\": 200" \
+#     --baseline "\"content-digest\": ${CONTENT_DIGEST}" \
+#     --created ${CREATED} \
+#     --keyid ${KEYID} \
+#     --tag fapi-2-response \
+#     --print-all
+#
+#   output:
+#
+#       "@method";req: GET
+#       "@target-uri";req: https://fapidev-rs.authlete.net/api/fapi/accounts?key=value
+#       "@status": 200
+#       "content-digest": sha-256=:RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=:
+#       "@signature-params": ("@method";req "@target-uri";req "@status" "content-digest");created=1729607861;#       keyid="tsq5sQwuoADZ3iARLOreaYaIa9mG5TnV11zpRRjuA0k";tag="fapi-2-response"
+#       ("@method";req "@target-uri";req "@status" "content-digest");created=1729607861;#       keyid="tsq5sQwuoADZ3iARLOreaYaIa9mG5TnV11zpRRjuA0k";tag="fapi-2-response"
+#       true
+#
+#
+# NOTE
+# ----
+#
+#   This script does not provide flexibility to change the order of
+#   signature metadata parameters, such as `created` and `tag`.
+#   The parameters are ordered alphabetically.
+#
+#   If the resource server implementation uses a different order,
+#   the signature verification will fail.
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'base64'
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Build signature metadata.
+  signature_metadata = build_signature_metadata(options)
+
+  # Build a signature-params-line.
+  signature_params_line = build_signature_params_line(options, signature_metadata)
+
+  # Build a signature base.
+  signature_base = build_signature_base(options, signature_params_line)
+
+  # Verify the signature.
+  result = verify_signature(options, signature_base)
+
+  # Signature Base
+  if options.print_signature_base
+    puts signature_base
+  end
+
+  # Signature Metadata
+  if options.print_signature_metadata
+    puts signature_metadata
+  end
+
+  # Verification Result
+  if options.print_verification_result
+    puts result
+  end
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DESC_ALG       = "specifies the 'alg' parameter."
+  DESC_BASELINE  = "specifies a signature-base-line (RFC 9421 Section 2.5)"
+  DESC_CREATED   = "specifies the 'created' parameter. TIME is seconds since epoch, or 'now'."
+  DESC_EXPIRES   = "specifies the 'expires' parameter. TIME is seconds since epoch, or '+{seconds}'."
+  DESC_KEY       = "specifies a file containing a private key in the JWK format."
+  DESC_KEYID     = "specifies the 'keyid' parameter."
+  DESC_NONCE     = "specifies the 'nonce' parameter."
+  DESC_SIGNATURE = "specifies the HTTP message signature to verify."
+  DESC_TAG       = "specifies the 'tag' parameter."
+
+  attr_reader :alg, :baselines, :created, :expires, :key, :keyid, :nonce, :signature, :tag
+  attr_reader :print_signature_base, :print_signature_metadata, :print_verification_result
+
+  def initialize
+    super
+
+    @alg       = nil
+    @baselines = []
+    @created   = nil
+    @expires   = nil
+    @key       = nil
+    @keyid     = nil
+    @nonce     = nil
+    @signature = nil
+    @tag       = nil
+
+    @print_signature_base      = false
+    @print_signature_metadata  = false
+    @print_verification_result = true
+
+    # For the 'tag' parameter.
+    self.on('--alg ALG', DESC_ALG) do |alg|
+      @alg = alg
+    end
+
+    # For signature-base-line's.
+    self.on('--baseline BASELINE', DESC_BASELINE) do |baseline|
+      @baselines << baseline
+    end
+
+    # For the 'created' parameter.
+    self.on('--created TIME', DESC_CREATED) do |time|
+      # If the specified value is 'now' (string)
+      if time == 'now'
+        # The current time is used as the creation time.
+        @created = Time.now.to_i
+      else
+        # The value is interpreted as seconds since the Unix epoch.
+        @created = time.to_i
+      end
+    end
+
+    # For the 'expires' parameter.
+    self.on('--expires TIME', DESC_EXPIRES) do |time|
+      if time.start_with?('+')
+        # Convert the substring after '+' to an integer.
+        seconds = time[1 .. -1].to_i
+
+        # If the --created option has already been used.
+        if @created.nil?
+          # The specified value is interpreted as a difference from the current time.
+          @expires = Time.now.to_i + seconds
+        else
+          # The specified value is interpreted as a difference from the creation time.
+          @expires = @created + seconds
+        end
+      else
+        # The value is interpreted as seconds since the Unix epoch.
+        @expires = time.to_i
+      end
+    end
+
+    # Private key for signing.
+    self.on('--key FILE', DESC_KEY) do |file|
+      @key = read_jwk(file)
+    end
+
+    # For the 'keyid' parameter.
+    self.on('--keyid KEYID', DESC_KEYID) do |id|
+      @keyid = id
+    end
+
+    # For the 'nonce' parameter.
+    self.on('--nonce NONCE', DESC_NONCE) do |nonce|
+      @nonce = nonce
+    end
+
+    # The HTTP message signature to verify.
+    self.on('--signature SIGNATURE', DESC_SIGNATURE) do |signature|
+      @signature = signature
+    end
+
+    # For the 'tag' parameter.
+    self.on('--tag TAG', DESC_TAG) do |tag|
+      @tag = tag
+    end
+
+    # Print the signature, and signature base.
+    self.on('--print-all') do
+      @print_signature_base      = true
+      @print_signature_metadata  = true
+      @print_verification_result = true
+    end
+
+    # Whether to print the signature base.
+    self.on('--[no-]print-signature-base') do |bool|
+      @print_signature_base = bool
+    end
+
+    # Whether to print the signature metadata.
+    self.on('--[no-]print-signature-metadata') do |bool|
+      @print_signature_metadata = bool
+    end
+
+    # Whether to print the signature verification result.
+    self.on('--[no-]print-verification-result') do |bool|
+      @print_verification_result = bool
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@key,       '--key FILE')
+    error_if_missing(@signature, '--signature SIGNATURE');
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# signature metadata
+#------------------------------------------------------------
+def build_signature_metadata(options)
+  metadata = '('
+
+  # Extract component identifiers from the baselines.
+  component_identifiers = options.baselines.map { |s| s.split(':')[0] }
+  metadata << component_identifiers.join(' ')
+
+  metadata << ')'
+
+  # alg
+  if !options.alg.nil?
+    metadata << ";alg=\"#{options.alg}\""
+  end
+
+  # created
+  if !options.created.nil?
+    metadata << ";created=#{options.created}"
+  end
+
+  # expires
+  if !options.expires.nil?
+    metadata << ";expires=#{options.expires}"
+  end
+
+  # keyid
+  if !options.keyid.nil?
+    metadata << ";keyid=\"#{options.keyid}\""
+  end
+
+  # nonce
+  if !options.nonce.nil?
+    metadata << ";nonce=\"#{options.nonce}\""
+  end
+
+  # tag
+  if !options.tag.nil?
+    metadata << ";tag=\"#{options.tag}\""
+  end
+
+  return metadata
+end
+
+
+#------------------------------------------------------------
+# signature-params-line
+#------------------------------------------------------------
+def build_signature_params_line(options, signature_metadata)
+  # RFC 9421 HTTP Message Signatures
+  # 2.5. Creating the Signature Base
+  #
+  #   signature-params-line = DQUOTE "@signature-params" DQUOTE
+  #        ":" SP inner-list
+  #
+  "\"@signature-params\": #{signature_metadata}"
+end
+
+
+#------------------------------------------------------------
+# signature-base
+#------------------------------------------------------------
+def build_signature_base(options, signature_params_line)
+  # RFC 9421 HTTP Message Signatures
+  # 2.5. Creating the Signature Base
+  #
+  #   signature-base = *( signature-base-line LF ) signature-params-line
+  #
+
+  base = ''
+
+  options.baselines.each do |baseline|
+    base << baseline
+    base << "\n"
+  end
+
+  base << signature_params_line
+
+  return base
+end
+
+
+#------------------------------------------------------------
+# verification
+#------------------------------------------------------------
+def verify_signature(options, signature_base)
+  # Verifier
+  verifier = HttpVerifier.new(options.key)
+
+  # Verify the signature.
+  verifier.http_verify(signature_base, options.signature)
+end
+
+
+#------------------------------------------------------------
+# HTTP Verifier
+#------------------------------------------------------------
+class HttpVerifier < JSON::JWS
+  def initialize(public_key)
+    self.alg    = autodetected_algorithm_from(public_key)
+    @public_key = public_key
+  end
+
+  def http_verify(signature_base, signature)
+    # RFC 9421 HTTP Message Signatures
+    # 3.3.7. JSON Web Signature (JWS) Algorithms
+    #
+    #   For both signing and verification, the HTTP message's
+    #   signature base (Section 2.5) is used as the entire
+    #   "JWS Signing Input". The JOSE Header [JWS] [RFC7517]
+    #   is not used, and the signature base is not first
+    #   encoded in Base64 before applying the algorithm.
+    #   The output of the JWS Signature is taken as a byte
+    #   array prior to the Base64url encoding used in JOSE.
+    #
+    self.signature = decode_signature(signature)
+    self.signature_base_string = signature_base
+
+    begin
+      self.verify! @public_key
+      true
+    rescue
+      false
+    end
+  end
+
+  private
+
+  def decode_signature(signature)
+    # Remove a leading colon, if any.
+    signature = signature.delete_prefix(":")
+
+    # Remove a trailing colon, if any.
+    signature = signature.delete_suffix(":")
+
+    # Decode the base64 string.
+    Base64.strict_decode64(signature)
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
