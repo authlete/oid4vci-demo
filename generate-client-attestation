@@ -74,6 +74,9 @@ def sign(payload, jwk)
   # Prepare a JWT with the header and the payload.
   jwt = JSON::JWT.new(payload)
 
+  # Set the 'typ' header parameter.
+  jwt.typ = 'oauth-client-attestation+jwt'
+
   # Sign the JWT with the key and convert it to JWS.
   jwt.sign(jwk).to_s
 end
