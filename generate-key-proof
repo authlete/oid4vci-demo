@@ -14,6 +14,7 @@
 #     --issuer={CREDENTIAL_ISSUER}       # -i {ISSUER}
 #     --key={PRIVATE_KEY_IN_JWK_FORMAT}  # -k {PRIVATE_KEY_IN_JWK_FORMAT}
 #     --nonce={C_NONCE}                  # -n {C_NONCE}
+#     [--did-jwk]
 #
 
 
@@ -21,6 +22,7 @@ require 'bundler/inline'
 
 gemfile do
   source 'https://rubygems.org'
+  gem 'base64'
   gem 'json-jwt'
   gem 'optparse'
 end
@@ -40,7 +42,7 @@ def main(args)
   payload = build_payload(options)
 
   # Generate a JWS by signing with the key.
-  proof = sign(payload, options.key)
+  proof = sign(payload, options)
 
   # Write the key proof to the standard output.
   puts proof
@@ -67,16 +69,35 @@ end
 #------------------------------------------------------------
 # Generate a JWS by signing with the key.
 #------------------------------------------------------------
-def sign(payload, jwk)
+def sign(payload, options)
   # Prepare a JWT with the header and the payload.
   jwt = JSON::JWT.new(payload)
 
   # Set up some header parameters.
   jwt.typ = 'openid4vci-proof+jwt'
-  jwt.jwk = jwk.normalize  # to a public key
+
+  # The private key for signing.
+  signing_key = options.key
+
+  # The public key to be embedded.
+  embedded_key = options.key.normalize
+
+  if options.did_jwk
+    jwt.kid = "did:jwk:#{encode_base64url(embedded_key.to_json)}"
+  else
+    jwt.jwk = embedded_key
+  end
 
   # Sign the JWT with the key and convert it to JWS.
-  jwt.sign(jwk).to_s
+  jwt.sign(signing_key).to_s
+end
+
+
+#------------------------------------------------------------
+# Encode the input by base64url.
+#------------------------------------------------------------
+def encode_base64url(input)
+  Base64.urlsafe_encode64(input, padding: false)
 end
 
 
@@ -88,8 +109,9 @@ class Options < OptionParser
   DESC_ISSUER    = "The identifier of the credential issuer."
   DESC_KEY       = "A file containing a private key in the JWK format."
   DESC_NONCE     = "The server-provided 'c_nonce' value."
+  DESC_DID_JWK   = "Embed the public key (not in 'jwk' but) in 'kid' using the 'did:jwk' method."
 
-  attr_reader :client_id, :issuer, :key, :nonce
+  attr_reader :client_id, :issuer, :key, :nonce, :did_jwk
 
   def initialize
     super
@@ -98,6 +120,7 @@ class Options < OptionParser
     @issuer    = nil
     @key       = nil
     @nonce     = nil
+    @did_jwk   = false
 
     self.on('-c CLIENT_ID', '--client-id=CLIENT_ID', DESC_CLIENT_ID) do |client_id|
       @client_id = client_id
@@ -113,6 +136,10 @@ class Options < OptionParser
 
     self.on('-n NONCE', '--nonce=NONCE', DESC_NONCE) do |nonce|
       @nonce = nonce
+    end
+
+    self.on('-d', '--did-jwk', DESC_DID_JWK) do |flag|
+      @did_jwk = flag
     end
   end
 
