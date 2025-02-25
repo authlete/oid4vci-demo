@@ -15,7 +15,7 @@ openssl pkey -pubout -in vc-issuer_private.pem > vc-issuer_public.pem
 ## Create a self-signed certificate in PEM format
 
 ```
-openssl req -x509 -days 100000 -key vc-issuer_private-key.pem -subj "/C=JP/ST=Tokyo/L=Chiyoda/O=Authlete, Inc./CN=trial.authlete.net" -addext subjectAltName=URI:trial.authlete.net > vc-issuer_certificate.pem
+openssl req -x509 -days 100000 -key vc-issuer_private-key.pem -subj "/C=JP/ST=Tokyo/L=Chiyoda/O=Authlete, Inc./CN=trial.authlete.net" -addext subjectAltName=URI:https://trial.authlete.net > vc-issuer_certificate.pem
 ```
 
 ## Create a private key in JWK format
