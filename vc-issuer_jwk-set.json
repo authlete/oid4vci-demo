@@ -2,6 +2,7 @@
   "keys": [
     {
       "kty": "EC",
+      "alg": "ES256",
       "crv": "P-256",
       "kid": "ZYGIOHYuA9IpUijVwQNul3nE536x1JSWHiOfdS7sadg",
       "x": "DnekwsJ6Z5l6qbPEUB6vivTaKBW6429cshcSZR5O1n0",
