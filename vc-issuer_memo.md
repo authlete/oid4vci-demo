@@ -1,5 +1,14 @@
 # Memo about VC Issuer Key Examples
 
+| file                        | description |
+|:----------------------------|:------------|
+| `vc-issuer_private-key.pem` | A private key in PEM format |
+| `vc-issuer_private-key.jwk` | A private key in JWK format |
+| `vc-issuer_public-key.pem`  | The paired public key in PEM format |
+| `vc-issuer_public-key.jwk`  | The paired public key in JWK format |
+| `vc-issuer_certificate.pem` | A self-signed certificate for the public key in PEM format |
+| `vc-issuer_jwk-set.json`    | A JWK Set containing the private key |
+
 ## Create a private key in PEM format
 
 ```
