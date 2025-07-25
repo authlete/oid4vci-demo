@@ -79,9 +79,16 @@ def sign(payload, jwk)
   # Prepare a JWT with the header and the payload.
   jwt = JSON::JWT.new(payload)
 
+  # The 'alg' in the JWK.
+  alg = jwk["alg"]
+
   # Set up some header parameters.
   jwt.typ = 'dpop+jwt'
   jwt.jwk = jwk.normalize  # to a public key
+
+  # Since the 'normalize' method drops 'alg' for some reason,
+  # set 'alg' manually.
+  jwt.jwk[:alg] = alg
 
   # Sign the JWT with the key and convert it to JWS.
   jwt.sign(jwk).to_s
