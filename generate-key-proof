@@ -163,7 +163,7 @@ class Options < OptionParser
     error_if_missing(@client_id, '--client-id=CLIENT_ID')
     error_if_missing(@issuer,    '--issuer=ISSUER')
     error_if_missing(@key,       '--key=FILE')
-    error_if_missing(@nonce,     '--nonce=NONCE')
+    #error_if_missing(@nonce,     '--nonce=NONCE')
   end
 
   def self.process(args)
