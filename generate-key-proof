@@ -10,11 +10,12 @@
 # -----
 #
 #   generate-key-proof
-#     --client-id={CLIENT_ID}            # -c {CLIENT_ID}
-#     --issuer={CREDENTIAL_ISSUER}       # -i {ISSUER}
-#     --key={PRIVATE_KEY_IN_JWK_FORMAT}  # -k {PRIVATE_KEY_IN_JWK_FORMAT}
-#     --nonce={C_NONCE}                  # -n {C_NONCE}
+#     --client-id={CLIENT_ID}               # -c {CLIENT_ID}
+#     --issuer={CREDENTIAL_ISSUER}          # -i {ISSUER}
+#     --key={PRIVATE_KEY_IN_JWK_FORMAT}     # -k {PRIVATE_KEY_IN_JWK_FORMAT}
+#     --nonce={C_NONCE}                     # -n {C_NONCE}
 #     [--did-jwk]
+#     [--key-attestation={KEY_ATTESTATION}] # -a {KEY_ATTESTATION}
 #
 
 
@@ -57,12 +58,17 @@ def build_payload(options)
   now = Time.now.to_i
 
   # Payload of a key proof
-  {
+  payload = {
     iss:   options.client_id,
     aud:   options.issuer,
-    iat:   now,
-    nonce: options.nonce
+    iat:   now
   }
+
+  if options.nonce
+    payload[:nonce] = options.nonce
+  end
+
+  return payload
 end
 
 
@@ -88,6 +94,11 @@ def sign(payload, options)
     jwt.jwk = embedded_key
   end
 
+  if options.key_attestation
+    # Add a 'key_attestation' header parameter.
+    jwt.header[:key_attestation] = options.key_attestation
+  end
+
   # Sign the JWT with the key and convert it to JWS.
   jwt.sign(signing_key).to_s
 end
@@ -105,22 +116,24 @@ end
 # Command line options
 #------------------------------------------------------------
 class Options < OptionParser
-  DESC_CLIENT_ID = "The identifier of the client application (wallet)."
-  DESC_ISSUER    = "The identifier of the credential issuer."
-  DESC_KEY       = "A file containing a private key in the JWK format."
-  DESC_NONCE     = "The server-provided 'c_nonce' value."
-  DESC_DID_JWK   = "Embed the public key (not in 'jwk' but) in 'kid' using the 'did:jwk' method."
+  DESC_CLIENT_ID       = "The identifier of the client application (wallet)."
+  DESC_ISSUER          = "The identifier of the credential issuer."
+  DESC_KEY             = "A file containing a private key in the JWK format."
+  DESC_NONCE           = "The server-provided 'c_nonce' value."
+  DESC_DID_JWK         = "Embed the public key (not in 'jwk' but) in 'kid' using the 'did:jwk' method."
+  DESC_KEY_ATTESTATION = "The key attestation set to the 'key_attestation' header parameter."
 
-  attr_reader :client_id, :issuer, :key, :nonce, :did_jwk
+  attr_reader :client_id, :issuer, :key, :nonce, :did_jwk, :key_attestation
 
   def initialize
     super
 
-    @client_id = nil
-    @issuer    = nil
-    @key       = nil
-    @nonce     = nil
-    @did_jwk   = false
+    @client_id       = nil
+    @issuer          = nil
+    @key             = nil
+    @nonce           = nil
+    @did_jwk         = false
+    @key_attestation = nil
 
     self.on('-c CLIENT_ID', '--client-id=CLIENT_ID', DESC_CLIENT_ID) do |client_id|
       @client_id = client_id
@@ -140,6 +153,10 @@ class Options < OptionParser
 
     self.on('-d', '--did-jwk', DESC_DID_JWK) do |flag|
       @did_jwk = flag
+    end
+
+    self.on('-a KEY_ATTESTATION', '--key-attestation=KEY_ATTESTATION', DESC_KEY_ATTESTATION) do |key_attestation|
+      @key_attestation = key_attestation
     end
   end
 
@@ -163,7 +180,6 @@ class Options < OptionParser
     error_if_missing(@client_id, '--client-id=CLIENT_ID')
     error_if_missing(@issuer,    '--issuer=ISSUER')
     error_if_missing(@key,       '--key=FILE')
-    #error_if_missing(@nonce,     '--nonce=NONCE')
   end
 
   def self.process(args)
