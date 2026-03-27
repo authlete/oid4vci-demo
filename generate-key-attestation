@@ -1,0 +1,167 @@
+#!/usr/bin/env ruby
+#
+# OVERVIEW
+# --------
+#
+#   This script generates a key attestation that complies with
+#   OpenID for Verifiable Credential Issuance 1.0.
+#
+# USAGE
+# -----
+#
+#   generate-key-attestation
+#     --attester-key={ATTESTER_PRIVATE_KEY_FILE}
+#     --attested-key={ATTESTED_PUBLIC_KEY_FILE}
+#     --nonce={NONCE}
+#     --duration={DURATION_IN_SECONDS}
+#
+
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'json-jwt'
+  gem 'optparse'
+end
+
+require 'time'
+
+
+#------------------------------------------------------------
+# main
+#------------------------------------------------------------
+def main(args)
+  # Process the command line options.
+  options = Options.process(args)
+
+  # Prepare the payload of the key attestation.
+  payload = build_payload(options)
+
+  # Generate a JWS by signing with the attester's key.
+  key_attestation = sign(payload, options.attester_key)
+
+  # Write the key attestation to the standard output.
+  puts key_attestation
+end
+
+
+#------------------------------------------------------------
+# Prepare the payload of the key attestation
+#------------------------------------------------------------
+def build_payload(options)
+  # The current time in seconds for time-related claims
+  now = Time.now.to_i
+
+  # Payload of a key attestation
+  payload = {
+    iat: now,
+    exp: now + options.duration,
+    attested_keys: options.attested_keys
+  }
+
+  if options.nonce
+    payload[:nonce] = options.nonce
+  end
+
+  return payload;
+end
+
+
+#------------------------------------------------------------
+# Generate a JWS by signing with the attester's key.
+#------------------------------------------------------------
+def sign(payload, jwk)
+  # Prepare a JWT with the header and the payload.
+  jwt = JSON::JWT.new(payload)
+
+  # Set the 'typ' header parameter.
+  jwt.typ = 'key-attestation+jwt'
+
+  # Sign the JWT with the key and convert it to JWS.
+  jwt.sign(jwk).to_s
+end
+
+
+#------------------------------------------------------------
+# Command line options
+#------------------------------------------------------------
+class Options < OptionParser
+  DESC_ATTESTER_KEY = "The file containing the private key of the key attestation issuer in the JWK format."
+  DESC_ATTESTED_KEY = "The file containing an attested key in the JWK format."
+  DESC_NONCE        = "A nonce issued from the nonce endpoint."
+  DESC_DURATION     = "The duration of the key attestation in seconds. The default value is 86400."
+
+  attr_reader :attester_key, :attested_keys, :nonce, :duration
+
+  def initialize
+    super
+
+    @attester_key  = nil
+    @attested_keys = []
+    @nonce         = nil
+    @duration      = 86400
+
+    self.on('--attester-key=FILE', DESC_ATTESTER_KEY) do |file|
+      @attester_key = read_jwk(file)
+    end
+
+    self.on('--attested_key=FILE', DESC_ATTESTED_KEY) do |file|
+      @attested_keys << read_jwk(file).normalize
+    end
+
+    self.on('--nonce=NONCE', DESC_NONCE) do |nonce|
+      @nonce = nonce
+    end
+
+    self.on('--duration=DURATION', DESC_DURATION) do |duration|
+      @duration = to_integer(duration, '--duration')
+    end
+  end
+
+  private
+
+  def read_jwk(file)
+    json = File.read(file)
+    hash = JSON.parse(json, {symbolize_names: true})
+    JSON::JWK.new(hash)
+  end
+
+  def to_integer(value, option)
+    begin
+      return Integer(value)
+    rescue ArgumentError
+      raise OptionParser::ParseError.new "The value of the '#{option}' option is not an integer."
+    end
+  end
+
+  def error_if_missing(value, option)
+    if value.nil?
+      raise OptionParser::ParseError.new "'#{option}' is missing."
+    end
+  end
+
+  public
+
+  def verify
+    error_if_missing(@attester_key, '--attester-key=FILE')
+
+    if @attested_keys.empty?
+      raise OptionParser::ParseError.new "At least one attested key must be specified using the '--attested-key' option."
+    end
+  end
+
+  def self.process(args)
+    options = Options.new
+    options.parse(args)
+    options.verify()
+
+    return options
+  end
+end
+
+
+#------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------
+main(ARGV)
