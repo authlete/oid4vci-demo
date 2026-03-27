@@ -3,14 +3,13 @@
 # OVERVIEW
 # --------
 #
-#   This script geerates a client attestation that complies with
+#   This script generates a client attestation that complies with
 #   OAuth 2.0 Attestation-Based Client Authentication.
 #
 # USAGE
 # -----
 #
 #   generate-client-attestation
-#     --attester-id={ATTESTER_ID}
 #     --attester-key={ATTESTER_PRIVATE_KEY_FILE}
 #     --client-id={CLIENT_ID}
 #     --client-key={CLIENT_PUBLIC_KEY_FILE}
@@ -56,7 +55,6 @@ def build_payload(options)
 
   # Payload of a client attestation
   {
-    iss: options.attester_id,
     sub: options.client_id,
     iat: now,
     exp: now + options.duration,
@@ -86,26 +84,20 @@ end
 # Command line options
 #------------------------------------------------------------
 class Options < OptionParser
-  DESC_ATTESTER_ID  = "The identifier of the client attestation issuer."
   DESC_ATTESTER_KEY = "The file containing the private key of the client attestation issuer in the JWK format."
   DESC_CLIENT_ID    = "The identifier of the client application."
   DESC_CLIENT_KEY   = "The file containing the public key of the client application in the JWK format."
   DESC_DURATION     = "The duration of the client attestation in seconds. The default value is 86400."
 
-  attr_reader :attester_id, :attester_key, :client_id, :client_key, :duration
+  attr_reader :attester_key, :client_id, :client_key, :duration
 
   def initialize
     super
 
-    @attester_id  = nil
     @attester_key = nil
     @client_id    = nil
     @client_key   = nil
     @duration     = 86400
-
-    self.on('--attester-id=ATTESTER_ID', DESC_ATTESTER_ID) do |id|
-      @attester_id = id
-    end
 
     self.on('--attester-key=FILE', DESC_ATTESTER_KEY) do |file|
       @attester_key = read_jwk(file)
@@ -150,7 +142,6 @@ class Options < OptionParser
   public
 
   def verify
-    error_if_missing(@attester_id,  '--attester-id=ATTESTER_ID')
     error_if_missing(@attester_key, '--attester-key=FILE')
     error_if_missing(@client_id,    '--client-id=CLIENT_ID')
     error_if_missing(@client_key,   '--client-key=CLIENT_KEY')
