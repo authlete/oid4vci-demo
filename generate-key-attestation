@@ -14,6 +14,7 @@
 #     --attested-key={ATTESTED_PUBLIC_KEY_FILE}
 #     --nonce={NONCE}
 #     --duration={DURATION_IN_SECONDS}
+#     --x5c={X509_CERTIFICATE_PEM_FILE}
 #
 
 
@@ -39,7 +40,7 @@ def main(args)
   payload = build_payload(options)
 
   # Generate a JWS by signing with the attester's key.
-  key_attestation = sign(payload, options.attester_key)
+  key_attestation = sign(payload, options)
 
   # Write the key attestation to the standard output.
   puts key_attestation
@@ -71,15 +72,20 @@ end
 #------------------------------------------------------------
 # Generate a JWS by signing with the attester's key.
 #------------------------------------------------------------
-def sign(payload, jwk)
+def sign(payload, options)
   # Prepare a JWT with the header and the payload.
   jwt = JSON::JWT.new(payload)
 
   # Set the 'typ' header parameter.
   jwt.typ = 'key-attestation+jwt'
 
+  # If elements for the 'x5c' header parameter are specified.
+  if !options.x5c.empty?
+    jwt.header[:x5c] = options.x5c
+  end
+
   # Sign the JWT with the key and convert it to JWS.
-  jwt.sign(jwk).to_s
+  jwt.sign(options.attester_key).to_s
 end
 
 
@@ -91,8 +97,9 @@ class Options < OptionParser
   DESC_ATTESTED_KEY = "The file containing an attested key in the JWK format."
   DESC_NONCE        = "A nonce issued from the nonce endpoint."
   DESC_DURATION     = "The duration of the key attestation in seconds. The default value is 86400."
+  DESC_X5C          = "The file containing an X.509 certificate in PEM format, used as an element of the x5c header parameter."
 
-  attr_reader :attester_key, :attested_keys, :nonce, :duration
+  attr_reader :attester_key, :attested_keys, :nonce, :duration, :x5c
 
   def initialize
     super
@@ -101,6 +108,7 @@ class Options < OptionParser
     @attested_keys = []
     @nonce         = nil
     @duration      = 86400
+    @x5c           = []
 
     self.on('--attester-key=FILE', DESC_ATTESTER_KEY) do |file|
       @attester_key = read_jwk(file)
@@ -117,6 +125,10 @@ class Options < OptionParser
     self.on('--duration=DURATION', DESC_DURATION) do |duration|
       @duration = to_integer(duration, '--duration')
     end
+
+    self.on('--x5c=FILE', DESC_X5C) do |file|
+      @x5c << read_pem(file)
+    end
   end
 
   private
@@ -125,6 +137,13 @@ class Options < OptionParser
     json = File.read(file)
     hash = JSON.parse(json, {symbolize_names: true})
     JSON::JWK.new(hash)
+  end
+
+  def read_pem(file)
+    pem = File.read(file)
+    cer = pem.lines.reject{|line| line.start_with?('-----')}.map(&:strip).join
+
+    return cer
   end
 
   def to_integer(value, option)

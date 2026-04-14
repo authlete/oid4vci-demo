@@ -76,7 +76,7 @@ def sign(payload, options)
   # Set the 'typ' header parameter.
   jwt.typ = 'oauth-client-attestation+jwt'
 
-  # If elements for the 'x5c header parameter are specified.
+  # If elements for the 'x5c' header parameter are specified.
   if !options.x5c.empty?
     jwt.header[:x5c] = options.x5c
   end
